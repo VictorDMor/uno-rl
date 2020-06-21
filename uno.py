@@ -1,27 +1,45 @@
-from itertools import cycle
-import numpy as np
+'''
+Random standard library is imported for handling card shuffle at given moments.
+'''
 import random
+
 import sys
 import pickle
+import numpy as np
 
 LEARNING_RATE = 0.2
 DECAY_GAMMA = 0.9
 EXPLORATION_RATE = 0.3
+ROUNDS = int(sys.argv[1])
 
 # TODO: Refactor
 class Card:
+    '''
+    This class models a UNO game card.
+
+    Args:
+        color (str):
+        Card color, ranges from red, blue, yellow or green.
+        Special action cards can be used on any color, so they are joker cards.
+
+        symbol (str):
+        Card symbol, it can be a number from 0 to 9 or an action card symbol,
+        such as +2, Skip, Reverse or jokers +4 and Change Color.
+
+        Used (boolean, optional):
+        Indicates whether the card effect has already passed. Used only for action cards.
+    '''
     def __init__(self, color, symbol, used=None):
         self.color = color
         self.symbol = symbol
-        self.used = used # only for special cards
+        self.used = used
 
 class Game:
     def __init__(self, players):
         self.players = players
-        self.number_of_players = len(players)
+        self.number_of_players = len(self.players)
         self.cards = []
-        self.player_order = list(range(1, len(players)+1))
-        self.discarded = []
+        self.player_order = list(range(1, self.number_of_players+1))
 
     def init_cards(self):
         colors = ['blue', 'green', 'yellow', 'red']
@@ -35,7 +53,7 @@ class Game:
             for k in ['+2', 'Skip', 'Reverse']:
                 self.cards.append(Card(i, k))
                 self.cards.append(Card(i, k))
-        for i in range(4):
+        for _ in range(4):
             self.cards.append(Card('joker', '+4'))
             self.cards.append(Card('joker', 'Change Color'))
 
@@ -47,10 +65,10 @@ class Game:
         random.shuffle(self.cards)
         for _ in range(7):
             for player in self.player_order:
-                    card = self.cards.pop(0)
-                    self.players[player-1].deck.append(card)
-        first_discarded_card = self.cards.pop(0)
-        self.discarded.append(first_discarded_card)
+                card = self.cards.pop(0)
+                self.players[player-1].deck.append(card)
+        while self.cards[0].symbol == '+4':
+            random.shuffle(self.cards)
 
     def play_game(self, rounds=10):
         # In the first round, Player 1 is the first to deal and then player 2 starts (depending on which card is the first discarded)
@@ -72,14 +90,11 @@ class Game:
             print("=" * 50)
             while self.game_finished is False:
                 current_player = self.players[self.check_turn()-1]
-                # current_player.show_deck()
+                current_player.show_deck()
                 print("{}'s turn!".format(current_player.name))
-                if len(self.cards) == 0:
-                    self.init_cards()
-                    self.discarded = [self.cards.pop(0)]
                 state = self.get_state()
                 current_player.add_state(str(state))
-                current_player.take_action(self.discarded, self.cards, state)
+                current_player.take_action(self.cards, state)
                 if len(current_player.deck) == 1: print("{} says UNO!".format(current_player.name)) 
                 self.game_finished = self.check_winner(current_player)
             self.cards = []
@@ -100,10 +115,10 @@ class Game:
         return turn
 
     def check_turn(self):
-        top_card = self.discarded[-1]
+        top_card = self.cards[-1]
         if top_card.symbol == 'Reverse' and not top_card.used:
             top_card.used = True
-            if len(self.players) == 2:
+            if self.number_of_players == 2:
                 return self.skip_turn()
             self.already_played.reverse()
             self.game_order.reverse()
@@ -129,7 +144,7 @@ class Game:
             current_state[player.player_id] = []
             for card in player.deck:
                 current_state[player.player_id].append((card.color, card.symbol))
-        current_state["D"] = (self.discarded[-1].color, self.discarded[-1].symbol)
+        current_state["D"] = (self.cards[-1].color, self.cards[-1].symbol)
         return current_state
 
     def check_winner(self, player):
@@ -137,10 +152,12 @@ class Game:
             print("{} won the game!".format(player.name))
             player.feed_reward(1)
             player.reset_states()
+            player.deck = []
             for other_players in self.players:
                 if other_players != player:
                     other_players.feed_reward(0)
                     other_players.reset_states()
+                    other_players.deck = []
             player.wins += 1
             return True
         return False
@@ -180,7 +197,7 @@ class Player:
 
     def show_deck(self):
         print("==============================================")
-        print("{}'s cards are: ".format(self.name))
+        print("{} has {} cards: ".format(self.name, len(self.deck)))
         for card in self.deck:
             print("{} {}".format(card.color, card.symbol))
         print("==============================================")
@@ -194,7 +211,7 @@ class Player:
             i += 1
         print("==============================================")
 
-    def play_card(self, matched_cards, discarded_cards, current_state):
+    def play_card(self, matched_cards, current_state):
         if np.random.uniform(0, 1) <= self.exp_rate:
             random.shuffle(matched_cards)
             card = matched_cards.pop(0)
@@ -212,7 +229,7 @@ class Player:
         if card.symbol in ['Change Color', '+4']:
             card.color = self.choose_color()
             print("{} chose {}".format(self.name, card.color))
-        discarded_cards.append(card)
+            if card.symbol == 'Change Color': card.used = True
         return card
 
     def human_choose_color(self):
@@ -223,7 +240,7 @@ class Player:
         chosen_color = colors[int(input("Choice : "))-1]
         return chosen_color
 
-    def human_play_card(self, matched_cards, discarded_cards):
+    def human_play_card(self, matched_cards):
         self.show_deck()
         self.show_matched_deck(matched_cards)
         card_idx = int(input("Which card do you want to play?"))
@@ -232,7 +249,6 @@ class Player:
         if card.symbol in ['Change Color', '+4']:
             card.color = self.human_choose_color()
             print("{} chose {}".format(self.name, card.color))
-        discarded_cards.append(card)
         return card
 
     def choose_color(self):
@@ -256,90 +272,76 @@ class Player:
             return True
         return False
 
-    def buy_cards(self, cards, amount, discarded):
+    def buy_cards(self, cards, amount):
         for _ in range(amount):
-            if len(cards) == 0:
-                for card in discarded:
-                    if card.color in ['red', 'yellow', 'blue', 'green'] and card.symbol in ['+4', 'Change Color']:
-                        card.color = 'joker'
-                    if card.symbol in ['Skip', 'Reverse'] and card.used:
-                        card.used = None
-                random.shuffle(discarded)
-                cards = discarded
-                discarded = []
             new_card = cards.pop(0)
             self.deck.append(new_card)
 
-    def take_action(self, discarded_cards, cards, current_state):
+    def take_action(self, cards, current_state):
         buy_extra = True
         matched_cards = []
-        print("Discarded card at top is {} {}".format(discarded_cards[-1].color, discarded_cards[-1].symbol))
-        if len(discarded_cards) == 1:
-            # First discard!
-            if discarded_cards[0].symbol == 'Change Color':
-                discarded_cards[0].color = self.choose_color()
-                print("{} chose {}".format(self.name, discarded_cards[-1].color))
-            elif discarded_cards[0].symbol == '+4':
-                cards.append(discarded_cards[0])
-                discarded_cards.pop(0)
-                new_first_discard = cards.pop(0)
-                discarded_cards.append(new_first_discard)
-        top_discarded_card = discarded_cards[-1]
-        if top_discarded_card.symbol in ['+2', '+4']:
-            amount_to_buy = int(top_discarded_card.symbol[1:])
+        discarded = cards[-1]
+        print("Discarded card at top is {} {}".format(discarded.color, discarded.symbol))
+        if discarded.symbol == 'Change Color' and not discarded.used:
+            discarded.color = self.choose_color()
+            print("{} chose {}".format(self.name, discarded.color))
+        if discarded.symbol in ['+2', '+4'] and not discarded.used:
+            amount_to_buy = int(discarded.symbol[1:])
             print("{} will need to buy {} cards!".format(self.name, amount_to_buy))
-            self.buy_cards(cards, amount_to_buy, discarded_cards)
+            self.buy_cards(cards, amount_to_buy)
             buy_extra = False
+            discarded.used = True
         for card in self.deck:
-            if self.compare_cards(card, top_discarded_card):
+            if self.compare_cards(card, discarded):
                 matched_cards.append(card)
-        # print("Length of matched cards is {}".format(len(matched_cards)))
         if len(matched_cards) > 0:
             if self.human:
-                card_chosen = self.human_play_card(matched_cards, discarded_cards)
+                card_chosen = self.human_play_card(matched_cards)
             else:
-                card_chosen = self.play_card(matched_cards, discarded_cards, current_state)
+                card_chosen = self.play_card(matched_cards, current_state)
             print("The card played by {} is {} {}".format(self.name, card_chosen.color, card_chosen.symbol))
+            cards.append(card_chosen)
         else:
             if buy_extra:
                 print("{} needs to buy a card!".format(self.name))
                 new_card = cards.pop(0)
-                if self.compare_cards(new_card, top_discarded_card):
-                    print("Card bought {} {} matches with discarded card {} {}".format(new_card.color, new_card.symbol, top_discarded_card.color, top_discarded_card.symbol))
+                if self.compare_cards(new_card, discarded):
+                    print("Card bought {} {} matches with discarded card {} {}".format(new_card.color, new_card.symbol, discarded.color, discarded.symbol))
                     if new_card.symbol == 'Change Color':
                         new_card.color = self.choose_color()
+                        new_card.used = True
                     print("The card played by {} is {} {}".format(self.name, new_card.color, new_card.symbol))
-                    discarded_cards.append(new_card)
+                    cards.append(new_card)
                 else:
                     self.deck.append(new_card)
 
     def save_policy(self):
-        fw = open('policy_' + str(self.name), 'wb')
-        pickle.dump(self.states_value, fw)
-        fw.close()
+        file_to_write = open('policy_' + str(self.name), 'wb')
+        pickle.dump(self.states_value, file_to_write)
+        file_to_write.close()
 
     def load_policy(self, file):
-        fr = open(file, 'rb')
-        self.states_value = pickle.load(fr)
-        fr.close()
+        file_to_read = open(file, 'rb')
+        self.states_value = pickle.load(file_to_read)
+        file_to_read.close()
 
 if __name__ == "__main__":
-    players = []
-    players.append(Player("Victor", 1))
-    players.append(Player("Angélica", 2))
-    # players.append(Player("Churros", 3))
-    # players.append(Player("Lucas", 4))
-    # players.append(Player("João", 5))
-    game = Game(players)
-    game.play_game(rounds=10000)
+    GAME_PLAYERS = []
+    GAME_PLAYERS.append(Player("Victor", 1))
+    GAME_PLAYERS.append(Player("Angélica", 2))
+    # GAME_PLAYERS.append(Player("Churros", 3))
+    # GAME_PLAYERS.append(Player("Lucas", 4))
+    # GAME_PLAYERS.append(Player("João", 5))
+    GAME = Game(GAME_PLAYERS)
+    GAME.play_game(rounds=ROUNDS)
 
-    new_players = []
-    new_players.append(Player("Victor", 1, human=True))
-    trained_player = Player("Angélica", 2)
-    trained_player.load_policy("policy_Angélica")
-    new_players.append(trained_player)
-    game_with_human = Game(new_players)
-    game_with_human.play_game(rounds=1)
+    # new_players = []
+    # new_players.append(Player("Victor", 1, human=True))
+    # trained_player = Player("Angélica", 2)
+    # trained_player.load_policy("policy_Angélica")
+    # new_players.append(trained_player)
+    # game_with_human = Game(new_players)
+    # game_with_human.play_game(rounds=1)
 
     # TODO: For a perfect game, introduce missing rules for first discards
     # TODO: Progressive Uno
