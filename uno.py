@@ -381,5 +381,3 @@ if __name__ == "__main__":
     NEW_PLAYERS.append(TRAINED_PLAYER)
     GAME_WITH_HUMAN = Game(NEW_PLAYERS)
     GAME_WITH_HUMAN.play_game(rounds=2)
-
-    # TODO: Progressive Uno
